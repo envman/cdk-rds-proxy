@@ -30,20 +30,20 @@ const getDbConnection = async () => {
   return knex({
     client: "pg",
     connection: {
-      host: secrets.host,
-      // host: proxyEndpoint,
+      // host: secrets.host,
+      host: proxyEndpoint,
       port: secrets.port,
       user: secrets.username,
       password: secrets.password,
       // password: 'WRONG',
       database: secrets.dbname,
     },
-    pool: {
-      afterCreate: (connection: any, cb: any) => {
-        console.log('afterCreate', connection)
-        cb()
-      },
-    }
+    // pool: {
+    //   afterCreate: (connection: any, cb: any) => {
+    //     console.log('afterCreate', connection)
+    //     cb()
+    //   },
+    // }
   });
 };
 

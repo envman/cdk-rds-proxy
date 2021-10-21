@@ -25,15 +25,15 @@ export class RdsCdkStack extends cdk.Stack {
     let lambdaToRDSProxyGroup = new ec2.SecurityGroup(this, 'Lambda to RDS Proxy Connection', {
       vpc
     });
-    // let dbConnectionGroup = new ec2.SecurityGroup(this, 'Proxy to DB Connection', {
-    //   vpc
-    // });
-    // dbConnectionGroup.addIngressRule(dbConnectionGroup, ec2.Port.tcp(3306), 'allow db connection');
-    // dbConnectionGroup.addIngressRule(lambdaToRDSProxyGroup, ec2.Port.tcp(3306), 'allow lambda connection');
+    let dbConnectionGroup = new ec2.SecurityGroup(this, 'Proxy to DB Connection', {
+      vpc
+    });
+    dbConnectionGroup.addIngressRule(dbConnectionGroup, ec2.Port.tcp(3306), 'allow db connection');
+    dbConnectionGroup.addIngressRule(lambdaToRDSProxyGroup, ec2.Port.tcp(3306), 'allow lambda connection');
 
     const databaseUsername = 'syscdk';
     const databaseCredentialsSecret = new secrets.Secret(this, 'DBCredentialsSecret', {
-      secretName: id+'-rds-credentials',
+      secretName: id + '-rds-credentials',
       generateSecretString: {
         secretStringTemplate: JSON.stringify({
           username: databaseUsername,
@@ -65,7 +65,7 @@ export class RdsCdkStack extends cdk.Stack {
         // },
         vpc,
         // enablePerformanceInsights: true,
-        // securityGroups: [dbConnectionGroup]
+        securityGroups: [dbConnectionGroup]
       },
       credentials: rds.Credentials.fromSecret(databaseCredentialsSecret),
       iamAuthentication: true,
@@ -79,9 +79,11 @@ export class RdsCdkStack extends cdk.Stack {
         secrets: [databaseCredentialsSecret],
         debugLogging: true,
         vpc,
-        // securityGroups: [dbConnectionGroup],
+        securityGroups: [dbConnectionGroup],
         requireTLS: false
     });
+
+    new CfnOutput(this, 'proxy-id', { value: proxy.dbProxyName })
     
     // Workaround for bug where TargetGroupName is not set but required
     let targetGroup = proxy.node.children.find((child:any) => {
@@ -97,7 +99,7 @@ export class RdsCdkStack extends cdk.Stack {
       securityGroups: [lambdaToRDSProxyGroup],
       environment: {
         PROXY_ENDPOINT: proxy.endpoint,
-        RDS_SECRET_NAME: id+'-rds-credentials'
+        RDS_SECRET_NAME: id + '-rds-credentials'
       },
       bundling: {
         nodeModules: ['knex', 'pg']
