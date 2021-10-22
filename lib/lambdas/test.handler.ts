@@ -1,11 +1,10 @@
-/* istanbul ignore file */
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
 import { APIGatewayProxyResult } from "aws-lambda";
 import { knex } from "knex";
-// import * as a from 'knex/lib/dialects/postgres/query'
+import * as AWS from "aws-sdk";
 
 const getDbConnection = async () => {
   const region = process.env.AWS_REGION;
@@ -24,19 +23,34 @@ const getDbConnection = async () => {
 
   const secrets = JSON.parse(rdsClusterSecret.SecretString);
 
-  console.log('proxyEndpoint', proxyEndpoint)
-  console.log('secrets', secrets)
+  const signer = new AWS.RDS.Signer({
+    region,
+    hostname: proxyEndpoint,
+    port: secrets.port,
+    username: secrets.username,
+  });
+
+  const token = await new Promise<string>((resolve, reject) => {
+    signer.getAuthToken({}, (err: AWS.AWSError, token: string) => {
+      if (err) return reject(err);
+
+      resolve(token);
+    });
+  });
+
+  console.log("token", token);
 
   return knex({
     client: "pg",
     connection: {
-      // host: secrets.host,
+      // token,
       host: proxyEndpoint,
       port: secrets.port,
       user: secrets.username,
+      // password: token,
       password: secrets.password,
-      // password: 'WRONG',
       database: secrets.dbname,
+      ssl: true
     },
     // pool: {
     //   afterCreate: (connection: any, cb: any) => {
@@ -48,20 +62,20 @@ const getDbConnection = async () => {
 };
 
 const handler = async (): Promise<APIGatewayProxyResult> => {
-  console.log('handler starting');
+  console.log("handler starting");
 
   const db = await getDbConnection();
-  console.log('has db connection');
+  console.log("has db connection");
 
   // await db('test').select()
   const exists = await db.schema.hasTable("test_table");
-  console.log('exists', exists);
-//   if (!exists) {
-//     await db.schema.createTable("test_table", (table) => {
-//       table.increments("id").primary();
-//       table.string("name");
-//     });
-//   }
+  console.log("exists", exists);
+  //   if (!exists) {
+  //     await db.schema.createTable("test_table", (table) => {
+  //       table.increments("id").primary();
+  //       table.string("name");
+  //     });
+  //   }
 
   return {
     statusCode: 200,
