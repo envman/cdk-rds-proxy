@@ -27,7 +27,7 @@ const getConnectionPool = async () => {
     user: secrets.username,
     password: secrets.password,
     database: secrets.dbname,
-    ssl: true,
+    // ssl: true,
   });
 };
 

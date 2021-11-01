@@ -98,7 +98,7 @@ export class RdsCdkStack extends cdk.Stack {
       vpc,
       securityGroups: [dbConnectionGroup],
       requireTLS: true,
-      iamAuth: true
+      // iamAuth: true
     });
 
     new CfnOutput(this, 'proxy-id', { value: proxy.dbProxyName })
@@ -123,6 +123,7 @@ export class RdsCdkStack extends cdk.Stack {
         nodeModules: ['pg']
       },
     })
+    new CfnOutput(this, 'createUserLambda', { value: createUserLambda.functionName })
 
     const rdsLambda = new lambda.NodejsFunction(this, 'rdsProxyHandler', {
       runtime: Runtime.NODEJS_14_X,
@@ -138,7 +139,7 @@ export class RdsCdkStack extends cdk.Stack {
       },
     })
 
-    new CfnOutput(this, 'LambdaId', { value: rdsLambda.functionName })
+    new CfnOutput(this, 'RDSLambdaID', { value: rdsLambda.functionName })
 
     databaseCredentialsSecret.grantRead(rdsLambda);
     
@@ -154,6 +155,30 @@ export class RdsCdkStack extends cdk.Stack {
       methods: [HttpMethod.GET],
       integration: new LambdaProxyIntegration({
         handler: createUserLambda
+      })
+    })
+
+    const proxyOnlyHandler = new lambda.NodejsFunction(this, 'proxyOnlyHandler', {
+      runtime: Runtime.NODEJS_14_X,
+      entry: path.join(__dirname, 'lambdas', 'proxy-only.handler.ts'),
+      vpc,
+      securityGroups: [lambdaToRDSProxyGroup],
+      environment: {
+        PROXY_ENDPOINT: proxy.endpoint,
+        RDS_SECRET_NAME: id + '-rds-credentials'
+      },
+      bundling: {
+        nodeModules: ['pg']
+      },
+    })
+    new CfnOutput(this, 'proxyOnlyLambda', { value: proxyOnlyHandler.functionName })
+
+    databaseCredentialsSecret.grantRead(proxyOnlyHandler);
+    api.addRoutes({
+      path: '/proxy-only',
+      methods: [HttpMethod.GET],
+      integration: new LambdaProxyIntegration({
+        handler: proxyOnlyHandler
       })
     })
 

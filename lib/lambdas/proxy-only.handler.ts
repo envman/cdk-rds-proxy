@@ -4,7 +4,6 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { APIGatewayProxyResult } from "aws-lambda";
 import { Pool } from "pg";
-import * as AWS from "aws-sdk";
 
 const getConnectionPool = async () => {
   const region = process.env.AWS_REGION;
@@ -23,40 +22,15 @@ const getConnectionPool = async () => {
 
   const secrets = JSON.parse(rdsClusterSecret.SecretString);
 
-  const signer = new AWS.RDS.Signer({
-    region,
-    hostname: proxyEndpoint,
-    port: secrets.port,
-    username: secrets.username,
-  });
-
-  const token = await new Promise<string>((resolve, reject) => {
-    signer.getAuthToken({}, (err: AWS.AWSError, token: string) => {
-      if (err) return reject(err);
-
-      resolve(token);
-    });
-  });
-
-  // console.log("token", token);
-
-  // const pem = await fs.readFile(path.join(__dirname, 'eu-west-1-bundle.pem'), 'utf8');
-
   return new Pool({
-    // host: proxyEndpoint,
-    host: secrets.host,
+    host: proxyEndpoint,
     port: secrets.port,
     user: secrets.username,
     password: secrets.password,
-    // password: token,
     database: secrets.dbname,
-    // ssl: true
+    ssl: true,
   });
 };
-
-const createUser = async (pool: Pool) => {
-  await pool.query('CREATE USER test_user WITH LOGIN; GRANT rds_iam to test_user');
-}
 
 const handler = async (): Promise<APIGatewayProxyResult> => {
   console.log("handler starting");
@@ -64,15 +38,13 @@ const handler = async (): Promise<APIGatewayProxyResult> => {
   const pool = await getConnectionPool();
   console.log("has db connection");
 
-  // const client = await pool.connect();
-  // await createUser(pool);
-  
-  const result = await pool.query('SELECT * FROM information_schema.tables');
-
-  // console.log('result', result);
+  const result = await pool.query("SELECT * FROM information_schema.tables");
+  console.log("result", result);
 
   await pool.end();
   console.log("disconnected from DB");
+
+  console.log('test');
 
   return {
     statusCode: 200,
