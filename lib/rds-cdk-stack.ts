@@ -8,7 +8,13 @@ import * as apigw from '@aws-cdk/aws-apigatewayv2';
 import * as integrations from '@aws-cdk/aws-apigatewayv2-integrations';
 import { Runtime } from '@aws-cdk/aws-lambda';
 import * as path from 'path';
-import { CfnOutput, Duration } from '@aws-cdk/core';
+import { CfnOutput } from '@aws-cdk/core';
+import * as iam from '@aws-cdk/aws-iam';
+import { Policy } from '@aws-cdk/aws-iam';
+import { Pool } from 'pg';
+import { ApiGatewayManagementApi } from 'aws-sdk';
+import { HttpMethod } from '@aws-cdk/aws-apigatewayv2';
+import { LambdaProxyIntegration } from '@aws-cdk/aws-apigatewayv2-integrations';
 
 export class RdsCdkStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
@@ -17,10 +23,6 @@ export class RdsCdkStack extends cdk.Stack {
     const vpc = new ec2.Vpc(this, 'Vpc', {
       maxAzs: 2, // Default is all AZs in the region
     });
-
-    // const vpc = ec2.Vpc.fromLookup(this, "VpcLookup", {
-    //   isDefault: true
-    // });
 
     let lambdaToRDSProxyGroup = new ec2.SecurityGroup(this, 'Lambda to RDS Proxy Connection', {
       vpc
@@ -49,6 +51,18 @@ export class RdsCdkStack extends cdk.Stack {
       stringValue: databaseCredentialsSecret.secretArn,
     });
 
+    // new iam.PolicyDocument({
+    //   statements: [
+    //     new iam.PolicyStatement({
+    //       actions: ['rds-db:connect'],
+    //       resources: [
+    //         '*',
+    //         // `arn:aws:rds-db:${}:${}:dbuser:${DBResourceId}/${DBUsername}`
+    //       ],
+    //     })
+    //   ]
+    // })
+
     const rdsCluster = new rds.DatabaseCluster(this, "RdsCluster", {
       engine: rds.DatabaseClusterEngine.auroraPostgres({
         version: rds.AuroraPostgresEngineVersion.VER_11_9,
@@ -60,6 +74,9 @@ export class RdsCdkStack extends cdk.Stack {
           ec2.InstanceClass.BURSTABLE3,
           ec2.InstanceSize.MEDIUM
         ),
+        // vpcSubnets: {
+        //   subnetType: ec2.SubnetType.PUBLIC,
+        // },
         // vpcSubnets: {
         //   subnetType: ec2.SubnetType.PRIVATE_WITH_NAT,
         // },
@@ -76,11 +93,12 @@ export class RdsCdkStack extends cdk.Stack {
 
     // Create an RDS Proxy
     const proxy = rdsCluster.addProxy(id+'-proxy', {
-        secrets: [databaseCredentialsSecret],
-        debugLogging: true,
-        vpc,
-        securityGroups: [dbConnectionGroup],
-        requireTLS: false
+      secrets: [databaseCredentialsSecret],
+      debugLogging: true,
+      vpc,
+      securityGroups: [dbConnectionGroup],
+      requireTLS: true,
+      iamAuth: true
     });
 
     new CfnOutput(this, 'proxy-id', { value: proxy.dbProxyName })
@@ -92,6 +110,20 @@ export class RdsCdkStack extends cdk.Stack {
 
     targetGroup.addPropertyOverride('TargetGroupName', 'default');
     
+    const createUserLambda = new lambda.NodejsFunction(this, 'createUserHandler', {
+      runtime: Runtime.NODEJS_14_X,
+      entry: path.join(__dirname, 'lambdas', 'create-user.handler.ts'),
+      vpc,
+      securityGroups: [dbConnectionGroup],
+      environment: {
+        // PROXY_ENDPOINT: proxy.endpoint,
+        RDS_SECRET_NAME: id + '-rds-credentials'
+      },
+      bundling: {
+        nodeModules: ['pg']
+      },
+    })
+
     const rdsLambda = new lambda.NodejsFunction(this, 'rdsProxyHandler', {
       runtime: Runtime.NODEJS_14_X,
       entry: path.join(__dirname, 'lambdas', 'test.handler.ts'),
@@ -109,13 +141,21 @@ export class RdsCdkStack extends cdk.Stack {
     new CfnOutput(this, 'LambdaId', { value: rdsLambda.functionName })
 
     databaseCredentialsSecret.grantRead(rdsLambda);
-
-    // defines an API Gateway Http API resource backed by our "rdsLambda" function.
+    
     let api = new apigw.HttpApi(this, 'Endpoint', {
-      defaultIntegration: new integrations.LambdaProxyIntegration({
-        handler: rdsLambda
-      })
+      // defaultIntegration: new integrations.LambdaProxyIntegration({
+      //   handler: rdsLambda
+      // })
     });
+
+    databaseCredentialsSecret.grantRead(createUserLambda);
+    api.addRoutes({
+      path: '/create-user',
+      methods: [HttpMethod.GET],
+      integration: new LambdaProxyIntegration({
+        handler: createUserLambda
+      })
+    })
 
     new cdk.CfnOutput(this, 'HTTP API Url', {
       value: api.url ?? 'Something went wrong with the deploy'
